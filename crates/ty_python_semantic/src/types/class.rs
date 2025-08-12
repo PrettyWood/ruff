@@ -25,7 +25,7 @@ use crate::types::{
     BareTypeAliasType, Binding, BoundSuperError, BoundSuperType, CallableType, DataclassParams,
     DeprecatedInstance, KnownInstanceType, StringLiteralType, TypeAliasType, TypeMapping,
     TypeRelation, TypeTransformer, TypeVarBoundOrConstraints, TypeVarInstance, TypeVarKind,
-    TypedDictParams, declaration_type, infer_definition_types, todo_type,
+    TypedDictParams, declaration_type, infer_definition_types,
 };
 use crate::{
     Db, FxIndexMap, FxOrderSet, Program,
@@ -2206,34 +2206,79 @@ impl<'db> ClassLiteral<'db> {
                 )))
             }
             (CodeGeneratorKind::TypedDict, "pop") => {
-                // TODO: synthesize a set of overloads with precise types.
-                // Required keys should be forbidden to be popped.
-                let signature = Signature::new(
-                    Parameters::new([
-                        Parameter::positional_only(Some(Name::new_static("self")))
-                            .with_annotated_type(instance_ty),
-                        Parameter::positional_only(Some(Name::new_static("key"))),
-                        Parameter::positional_only(Some(Name::new_static("default")))
-                            .with_default_type(Type::unknown()),
-                    ]),
-                    Some(todo_type!("Support for `TypedDict`")),
-                );
+                let overloads = self
+                    .fields(db, specialization, field_policy)
+                    .iter()
+                    .filter(|(_, field)| {
+                        // Only synthesize `pop` for fields that are not required.
+                        !field.is_required()
+                    })
+                    .flat_map(|(name, field)| {
+                        let key_type =
+                            Type::StringLiteral(StringLiteralType::new(db, name.as_str()));
 
-                Some(CallableType::function_like(db, signature))
+                        // `.pop()` without default
+                        let pop_sig = Signature::new(
+                            Parameters::new([
+                                Parameter::positional_only(Some(Name::new_static("self")))
+                                    .with_annotated_type(instance_ty),
+                                Parameter::positional_only(Some(Name::new_static("key")))
+                                    .with_annotated_type(key_type),
+                            ]),
+                            Some(field.declared_ty),
+                        );
+
+                        // `.pop()` with a default value
+                        let pop_with_default_sig = Signature::new(
+                            Parameters::new([
+                                Parameter::positional_only(Some(Name::new_static("self")))
+                                    .with_annotated_type(instance_ty),
+                                Parameter::positional_only(Some(Name::new_static("key")))
+                                    .with_annotated_type(key_type),
+                                Parameter::positional_only(Some(Name::new_static("default")))
+                                    .with_annotated_type(field.declared_ty),
+                            ]),
+                            Some(field.declared_ty),
+                        );
+
+                        [pop_sig, pop_with_default_sig]
+                    })
+                    .collect::<Vec<_>>();
+
+                Some(Type::Callable(CallableType::new(
+                    db,
+                    CallableSignature::from_overloads(overloads),
+                    true,
+                )))
             }
             (CodeGeneratorKind::TypedDict, "setdefault") => {
-                // TODO: synthesize a set of overloads with precise types
-                let signature = Signature::new(
-                    Parameters::new([
-                        Parameter::positional_only(Some(Name::new_static("self")))
-                            .with_annotated_type(instance_ty),
-                        Parameter::positional_only(Some(Name::new_static("key"))),
-                        Parameter::positional_only(Some(Name::new_static("default"))),
-                    ]),
-                    Some(todo_type!("Support for `TypedDict`")),
-                );
+                let overloads = self
+                    .fields(db, specialization, field_policy)
+                    .iter()
+                    .map(|(name, field)| {
+                        let key_type =
+                            Type::StringLiteral(StringLiteralType::new(db, name.as_str()));
 
-                Some(CallableType::function_like(db, signature))
+                        // `setdefault` always returns the field type
+                        Signature::new(
+                            Parameters::new([
+                                Parameter::positional_only(Some(Name::new_static("self")))
+                                    .with_annotated_type(instance_ty),
+                                Parameter::positional_only(Some(Name::new_static("key")))
+                                    .with_annotated_type(key_type),
+                                Parameter::positional_only(Some(Name::new_static("default")))
+                                    .with_annotated_type(field.declared_ty),
+                            ]),
+                            Some(field.declared_ty),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+
+                Some(Type::Callable(CallableType::new(
+                    db,
+                    CallableSignature::from_overloads(overloads),
+                    true,
+                )))
             }
             (CodeGeneratorKind::TypedDict, "update") => {
                 // TODO: synthesize a set of overloads with precise types
