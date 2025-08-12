@@ -2663,6 +2663,21 @@ pub(crate) fn report_cannot_pop_required_field_on_typed_dict<'db>(
     }
 }
 
+pub(crate) fn report_cannot_assign_readonly_field_on_typed_dict<'db>(
+    context: &InferContext<'db, '_>,
+    key_node: AnyNodeRef,
+    typed_dict_ty: Type<'db>,
+    field_name: &str,
+) {
+    let db = context.db();
+    if let Some(builder) = context.report_lint(&INVALID_ASSIGNMENT, key_node) {
+        let typed_dict_name = typed_dict_ty.display(db);
+        builder.into_diagnostic(format_args!(
+            "Cannot assign to read-only field '{field_name}' of TypedDict `{typed_dict_name}`",
+        ));
+    }
+}
+
 /// This function receives an unresolved `from foo import bar` import,
 /// where `foo` can be resolved to a module but that module does not
 /// have a `bar` member or submodule.

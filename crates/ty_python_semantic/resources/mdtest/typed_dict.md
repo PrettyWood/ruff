@@ -174,6 +174,47 @@ Type validation still applies to all fields when provided:
 invalid_type = Message(id="not-an-int", content="Hello")
 ```
 
+## `ReadOnly`
+
+`ReadOnly` fields in TypedDict cannot be modified after construction. This enforces immutable
+struct-like behavior:
+
+```py
+from typing import TypedDict
+from typing_extensions import ReadOnly, Required, NotRequired
+
+class Config(TypedDict):
+    version: ReadOnly[str]
+    debug: bool
+    cache_size: NotRequired[ReadOnly[int]]
+
+config1 = Config(version="1.0", debug=False)
+config2: Config = {"version": "1.0", "debug": False}
+
+config1_with_cache_size = Config(version="1.0", debug=False, cache_size=50)
+config2_with_cache_size: Config = {"version": "1.0", "debug": False, "cache_size": 50}
+
+# Reading read-only fields is allowed
+reveal_type(config1["version"])  # revealed: str
+reveal_type(config1_with_cache_size["cache_size"])  # revealed: int
+reveal_type(config2["version"])  # revealed: str
+reveal_type(config2_with_cache_size["cache_size"])  # revealed: int
+
+# Mutable fields can be assigned
+config1["debug"] = True
+config2["debug"] = True
+
+# error: [invalid-assignment] "Cannot assign to read-only field 'version' of TypedDict `Config`"
+config1["version"] = "2.0"
+# error: [invalid-assignment] "Cannot assign to read-only field 'version' of TypedDict `Config`"
+config2["version"] = "2.0"
+
+# error: [invalid-assignment] "Cannot assign to read-only field 'cache_size' of TypedDict `Config`"
+config1_with_cache_size["cache_size"] = 100
+# error: [invalid-assignment] "Cannot assign to read-only field 'cache_size' of TypedDict `Config`"
+config2_with_cache_size["cache_size"] = 100
+```
+
 ## Structural assignability
 
 Assignability between `TypedDict` types is structural, that is, it is based on the presence of keys

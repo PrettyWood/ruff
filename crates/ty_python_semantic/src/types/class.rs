@@ -1138,6 +1138,8 @@ pub(crate) enum FieldKind<'db> {
     TypedDict {
         /// Whether this field is required
         is_required: bool,
+        /// Whether this field is read-only
+        is_read_only: bool,
     },
 }
 
@@ -1159,7 +1161,15 @@ impl Field<'_> {
             FieldKind::Dataclass {
                 init, default_ty, ..
             } => default_ty.is_none() && *init,
-            FieldKind::TypedDict { is_required } => *is_required,
+            FieldKind::TypedDict { is_required, .. } => *is_required,
+        }
+    }
+
+    pub(crate) const fn is_read_only(&self) -> bool {
+        match &self.kind {
+            FieldKind::NamedTuple { .. } => true, // `NamedTuple` instances are immutable
+            FieldKind::Dataclass { init_only, .. } => *init_only,
+            FieldKind::TypedDict { is_read_only, .. } => *is_read_only,
         }
     }
 }
@@ -2106,10 +2116,15 @@ impl<'db> ClassLiteral<'db> {
                 let fields = self.fields(db, specialization, field_policy);
 
                 // Add (key type, value type) overloads for all TypedDict items ("fields"):
-                let overloads = fields.iter().map(|(name, field)| {
+                let overloads = fields.iter().filter_map(|(name, field)| {
+                    if field.is_read_only() {
+                        // Skip read-only fields, as they cannot be set.
+                        return None;
+                    }
+
                     let key_type = Type::StringLiteral(StringLiteralType::new(db, name.as_str()));
 
-                    Signature::new(
+                    let sig = Signature::new(
                         Parameters::new([
                             Parameter::positional_only(Some(Name::new_static("self")))
                                 .with_annotated_type(instance_ty),
@@ -2119,7 +2134,9 @@ impl<'db> ClassLiteral<'db> {
                                 .with_annotated_type(field.declared_ty),
                         ]),
                         Some(Type::none(db)),
-                    )
+                    );
+
+                    Some(sig)
                 });
 
                 Some(Type::Callable(CallableType::new(
@@ -2449,7 +2466,10 @@ impl<'db> ClassLiteral<'db> {
                                     .expect("TypedDictParams should be computed")
                                     .contains(TypedDictParams::TOTAL)
                             };
-                            FieldKind::TypedDict { is_required }
+                            FieldKind::TypedDict {
+                                is_required,
+                                is_read_only: attr.is_read_only(),
+                            }
                         }
                     };
 

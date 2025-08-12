@@ -101,6 +101,7 @@ use crate::types::diagnostic::{
     IncompatibleBases, POSSIBLY_UNBOUND_IMPLICIT_CALL, POSSIBLY_UNBOUND_IMPORT,
     TypeCheckDiagnostics, UNDEFINED_REVEAL, UNRESOLVED_ATTRIBUTE, UNRESOLVED_GLOBAL,
     UNRESOLVED_IMPORT, UNRESOLVED_REFERENCE, UNSUPPORTED_OPERATOR,
+    report_cannot_assign_readonly_field_on_typed_dict,
     report_cannot_pop_required_field_on_typed_dict, report_implicit_return_type,
     report_instance_layout_conflict, report_invalid_argument_number_to_special_form,
     report_invalid_arguments_to_annotated, report_invalid_arguments_to_callable,
@@ -842,7 +843,7 @@ pub(super) struct TypeInferenceBuilder<'db, 'ast> {
     cycle_fallback: bool,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 enum TypedDictAssignmentKind {
     /// For subscript assignments like `d["key"] = value`
     Subscript,
@@ -894,6 +895,17 @@ fn validate_typed_dict_key_assignment<'db, 'ast>(
         );
         return false;
     };
+
+    // Check if field is read-only (but allow constructor assignments)
+    if item.is_read_only() && assignment_kind == TypedDictAssignmentKind::Subscript {
+        report_cannot_assign_readonly_field_on_typed_dict(
+            context,
+            key_node.into(),
+            Type::TypedDict(typed_dict),
+            key,
+        );
+        return false;
+    }
 
     // Key exists, check if value type is assignable to declared type
     if value_ty.is_assignable_to(db, item.declared_ty) {
@@ -9701,7 +9713,8 @@ impl<'db> TypeInferenceBuilder<'db, '_> {
                         type_qualifier @ (SpecialFormType::ClassVar
                         | SpecialFormType::Final
                         | SpecialFormType::Required
-                        | SpecialFormType::NotRequired),
+                        | SpecialFormType::NotRequired
+                        | SpecialFormType::ReadOnly),
                     ) => {
                         let arguments = if let ast::Expr::Tuple(tuple) = slice {
                             &*tuple.elts
@@ -9725,6 +9738,9 @@ impl<'db> TypeInferenceBuilder<'db, '_> {
                                 }
                                 SpecialFormType::NotRequired => {
                                     type_and_qualifiers.add_qualifier(TypeQualifiers::NOT_REQUIRED);
+                                }
+                                SpecialFormType::ReadOnly => {
+                                    type_and_qualifiers.add_qualifier(TypeQualifiers::READ_ONLY);
                                 }
                                 _ => unreachable!(),
                             }
@@ -10960,15 +10976,11 @@ impl<'db> TypeInferenceBuilder<'db, '_> {
                 SpecialFormType::Deque,
                 KnownClass::Deque,
             ),
-
-            SpecialFormType::ReadOnly => {
-                self.infer_type_expression(arguments_slice);
-                todo_type!("`ReadOnly[]` type qualifier")
-            }
             SpecialFormType::ClassVar
             | SpecialFormType::Final
             | SpecialFormType::Required
-            | SpecialFormType::NotRequired => {
+            | SpecialFormType::NotRequired
+            | SpecialFormType::ReadOnly => {
                 if let Some(builder) = self.context.report_lint(&INVALID_TYPE_FORM, subscript) {
                     let diag = builder.into_diagnostic(format_args!(
                         "Type qualifier `{special_form}` is not allowed in type expressions \

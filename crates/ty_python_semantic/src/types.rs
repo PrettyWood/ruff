@@ -6475,10 +6475,12 @@ bitflags! {
         const FINAL     = 1 << 1;
         /// `dataclasses.InitVar`
         const INIT_VAR  = 1 << 2;
-        /// `typing_extensions.Required`
+        /// `typing(_extensions).Required`
         const REQUIRED = 1 << 3;
-        /// `typing_extensions.NotRequired`
+        /// `typing(_extensions).NotRequired`
         const NOT_REQUIRED = 1 << 4;
+        /// `typing(_extensions).ReadOnly`
+        const READ_ONLY = 1 << 5;
     }
 }
 
@@ -6496,6 +6498,7 @@ impl TypeQualifiers {
             Self::INIT_VAR => "InitVar",
             Self::REQUIRED => "Required",
             Self::NOT_REQUIRED => "NotRequired",
+            Self::READ_ONLY => "ReadOnly",
             _ => {
                 unreachable!("Only a single bit should be set when calling `TypeQualifiers::name`")
             }
